@@ -1,0 +1,142 @@
+import os
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import h5py
+from tqdm import tqdm
+import numpy as np
+import tensorflow as tf
+
+import hydra
+from hydra.core.config_store import ConfigStore
+from omegaconf import MISSING, OmegaConf
+
+from mimo.utils import ChannelConfig
+
+from sionna.phy.ofdm import ResourceGrid
+from sionna.phy.channel.tr38901 import AntennaArray, CDL
+from sionna.phy.channel import subcarrier_frequencies, cir_to_ofdm_channel
+
+
+@dataclass
+class CDLConfig:
+    save_path: Path = MISSING
+
+    channel: ChannelConfig = field(default_factory=ChannelConfig)
+    num_samples: int = 1000
+
+    max_chunk_product: int = 10000
+
+    def __post_init__(self):
+        if not self.save_path.suffix:
+            raise ValueError(f"Save path {self.save_path} must be a file!")
+
+
+cs = ConfigStore.instance()
+cs.store(name="cdl", node=CDLConfig)
+
+
+@hydra.main(version_base=None, config_name="cdl")
+def main(structured_cfg: CDLConfig) -> None:
+    cfg: CDLConfig = OmegaConf.to_object(structured_cfg)  # type: ignore[reportAssignmentType]
+    os.makedirs(cfg.save_path.parent, exist_ok=True)
+
+    # Define the number of UT and BS antennas
+    num_ut_ant = num_streams_per_tx = cfg.channel.num_rx
+    num_bs_ant = cfg.channel.num_tx
+    rg = ResourceGrid(
+        num_ofdm_symbols=14,
+        fft_size=76,
+        subcarrier_spacing=15e3,
+        num_tx=1,
+        num_streams_per_tx=num_streams_per_tx,
+        cyclic_prefix_length=6,
+        num_guard_carriers=[5, 6],
+        dc_null=True,
+        pilot_pattern="kronecker",
+        pilot_ofdm_symbol_indices=[2, 11],
+    )
+
+    carrier_frequency = 40e9  # [Hz]
+    ut_array = AntennaArray(
+        num_rows=num_ut_ant,
+        num_cols=1,
+        polarization="single",
+        polarization_type="V",
+        antenna_pattern="38.901",
+        carrier_frequency=carrier_frequency,
+    )
+    bs_array = AntennaArray(
+        num_rows=num_bs_ant,
+        num_cols=1,
+        polarization="single",
+        polarization_type="V",
+        antenna_pattern="38.901",
+        carrier_frequency=carrier_frequency,
+    )
+
+    delay_spread = 30e-9  # Nominal delay spread in [s]. Please see the CDL documentation
+    # about how to choose this value.
+    direction = "downlink"
+    cdl_model = cfg.channel.cdl_model
+    speed = 5  # UT speed [m/s]
+
+    # Configure a channel impulse reponse (CIR) generator for the CDL model.
+    # cdl() will generate CIRs that can be converted to discrete time or discrete frequency.
+    cdl = CDL(
+        cdl_model,
+        delay_spread,
+        carrier_frequency,
+        ut_array,
+        bs_array,
+        direction,
+        min_speed=speed,
+    )
+
+    # Chunk the channel generation process
+    dataset = np.zeros(
+        (cfg.num_samples, cfg.channel.num_rx, cfg.channel.num_tx), dtype=np.complex128
+    )
+    if (size_prod := cfg.channel.num_rx * cfg.channel.num_tx) > cfg.max_chunk_product:
+        print(
+            f"Warning: the array sizes {cfg.channel.num_rx, cfg.channel.num_tx = } \
+are larger than the chunk size, which may lead to OOM errors!"
+        )
+    chunk_size = cfg.max_chunk_product // size_prod
+    num_chunks = int(np.ceil(cfg.num_samples / chunk_size))
+    if num_chunks == 0:
+        raise ValueError("Need to run generation code for at least one chunk!")
+
+    gains, tau, h_freq = None, None, None
+    for i in tqdm(range(num_chunks)):
+        samples_in_chunk = min((i + 1) * chunk_size, cfg.num_samples) - i * chunk_size
+        gains, tau = cdl(
+            batch_size=samples_in_chunk,
+            num_time_steps=rg.num_ofdm_symbols,
+            sampling_frequency=1 / rg.ofdm_symbol_duration,
+        )
+        # Move to frequency domain
+        frequencies = subcarrier_frequencies(rg.fft_size, rg.subcarrier_spacing)
+        h_freq = cir_to_ofdm_channel(frequencies, gains, tau, normalize=True)
+        h_freq = tf.squeeze(h_freq).numpy()
+        if direction == "uplink":
+            h_freq = np.conj(np.transpose(h_freq, axes=(0, 2, 1, 3, 4)))
+
+        # Subsample data at random in the time-frequency grid
+        random_times = np.random.randint(0, h_freq.shape[-2], size=samples_in_chunk)
+        random_freqs = np.random.randint(0, h_freq.shape[-1], size=samples_in_chunk)
+        dataset[i * chunk_size : i * chunk_size + samples_in_chunk, ...] = h_freq[
+            range(samples_in_chunk), ..., random_times, random_freqs
+        ]
+
+    # Save dataset to disk
+    with h5py.File(cfg.save_path, "w") as f:
+        f.create_dataset("data", data=dataset)
+        f.create_dataset("cdl_model", data=cfg.channel.cdl_model)
+        f.create_dataset("num_rx", data=cfg.channel.num_rx)
+        f.create_dataset("num_tx", data=cfg.channel.num_rx)
+
+
+if __name__ == "__main__":
+    main()
