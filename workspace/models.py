@@ -95,12 +95,18 @@ def get_model(
             noise_levels = np.exp(
                 np.linspace(
                     np.log(max_noise_level),
-                    np.log(max_noise_level * noise_step_factor ** (num_noise_levels - 1)),
+                    np.log(
+                        max_noise_level * noise_step_factor ** (num_noise_levels - 1)
+                    ),
                     num_noise_levels,
                 )
             )
-            noise_levels = torch.tensor(noise_levels, device=device, dtype=torch.float32)
-            model_config = UNetConfig(noise_levels=noise_levels, sample_size=(num_rx, num_tx))
+            noise_levels = torch.tensor(
+                noise_levels, device=device, dtype=torch.float32
+            )
+            model_config = UNetConfig(
+                noise_levels=noise_levels, sample_size=(num_rx, num_tx)
+            )
             model = get_diffusers_model(model_config)
 
         case "ncsnv2":

@@ -101,9 +101,13 @@ def sample_from_model(
 
     for outer_step in tqdm(range(num_steps_outer)):
         step_size = torch.tensor(
-            alpha_0 * r ** (2 * outer_step), dtype=torch.float32, device=noise_levels.device
+            alpha_0 * r ** (2 * outer_step),
+            dtype=torch.float32,
+            device=noise_levels.device,
         )
-        noise_std = torch.sqrt(2 * torch.tensor(beta, device=noise_levels.device) * step_size)
+        noise_std = torch.sqrt(
+            2 * torch.tensor(beta, device=noise_levels.device) * step_size
+        )
         for _ in range(num_steps_inner):
             # Predict with diffusion model
             labels = outer_step * torch.ones(
@@ -121,7 +125,9 @@ def sample_from_model(
                     raise RuntimeError(
                         "Pilots and measurement noise must be passed together with measurements!"
                     )
-                reconstructed_measurements = torch.matmul(real_to_complex(current), pilots)
+                reconstructed_measurements = torch.matmul(
+                    real_to_complex(current), pilots
+                )
                 conditional = torch.matmul(
                     reconstructed_measurements - measurements,
                     pilots.transpose(-1, -2).conj(),
@@ -211,7 +217,9 @@ def main(structured_cfg: SamplingConfig) -> None:
         alpha_0 = cfg.alpha_0
 
     # Compute validation loss
-    stddev_idx = torch.randint(0, len(model.sigmas), (len(val_samples),), device=cfg.device)
+    stddev_idx = torch.randint(
+        0, len(model.sigmas), (len(val_samples),), device=cfg.device
+    )
     stddev = model.sigmas[stddev_idx]
     val_samples = complex_to_real(val_samples)
     val_samples_noisy, noise = add_noise_to_data(val_samples, stddev)

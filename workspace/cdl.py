@@ -76,7 +76,9 @@ def main(structured_cfg: CDLConfig) -> None:
         carrier_frequency=carrier_frequency,
     )
 
-    delay_spread = 30e-9  # Nominal delay spread in [s]. Please see the CDL documentation
+    delay_spread = (
+        30e-9  # Nominal delay spread in [s]. Please see the CDL documentation
+    )
     # about how to choose this value.
     direction = "downlink"
     cdl_model = cfg.channel.cdl_model
