@@ -1,7 +1,10 @@
+import asyncio
+import json
+
 from pathlib import Path
 from pydantic_ai import Agent
 
-model = 'openrouter:nvidia/nemotron-3-nano-30b-a3b:free'
+model = "openrouter:nvidia/nemotron-3-nano-30b-a3b:free"
 
 user_prompt = f"""
 Read all files in the 'workspace' folder.
@@ -10,6 +13,7 @@ Respond with its source code.
 """
 
 agent = Agent(model)
+
 
 @agent.tool_plain
 def get_files_in_folder(path: Path) -> str:
@@ -23,5 +27,26 @@ def get_files_in_folder(path: Path) -> str:
 def read_file(path: Path) -> str:
     return path.read_text()
 
-result = agent.run_sync(user_prompt)
-print(result.output)
+
+async def run_agent():
+    captured_nodes = []
+    async with agent.iter(user_prompt) as agent_run:
+        async for node in agent_run:
+            # Each node represents a step in the agent's execution
+            captured_nodes.append(node)
+
+    # Save agent trajectory to JSON
+    json_bytes = agent_run.all_messages_json()
+    json_data = json.loads(json_bytes)
+    with open("agent_run.json", "w") as f:
+        json.dump(json_data, f, indent=2)
+
+    # Print final result to console
+    if agent_run.result:
+        print(agent_run.result.output)
+    else:
+        print("Agent did not finish its task!")
+
+
+if __name__ == "__main__":
+    asyncio.run(run_agent())
