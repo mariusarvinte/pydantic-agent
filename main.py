@@ -9,7 +9,7 @@ model = "openrouter:nvidia/nemotron-3-nano-30b-a3b:free"
 user_prompt = f"""
 Read all files in the 'workspace' folder.
 Identify which one of them is responsible for training a deep learning model.
-Respond with its source code.
+Write a summary of it to 'analysis/train.md'.
 """
 
 agent = Agent(model)
@@ -26,6 +26,21 @@ def get_files_in_folder(path: Path) -> str:
 @agent.tool_plain
 def read_file(path: Path) -> str:
     return path.read_text()
+
+
+@agent.tool_plain
+def write_file(path: Path, contents: str) -> str:
+    """
+    Writes 'contents' to the file at 'path'.
+    Creates the parent directory of 'path' if required.
+    """
+
+    # Create parent directory if required
+    path.parent.mkdir(exist_ok=True)
+
+    # Write contents to file
+    path.write_text(contents)
+    return "Success!"
 
 
 async def run_agent():
