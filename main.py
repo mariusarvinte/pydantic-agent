@@ -9,7 +9,7 @@ model = "openrouter:nvidia/nemotron-3-nano-30b-a3b:free"
 user_prompt = f"""
 Read all files in the 'workspace' folder.
 Identify which one of them is responsible for training a deep learning model.
-Write a summary of it to 'analysis/train.md'.
+Modify it **only once** to improve training speed without losing numerical precision.
 """
 
 agent = Agent(model)
@@ -40,6 +40,23 @@ def write_file(path: Path, contents: str) -> str:
 
     # Write contents to file
     path.write_text(contents)
+    return "Success!"
+
+
+@agent.tool_plain
+def edit_file(path: Path, current: str, new: str) -> str:
+    """
+    Edits the file at 'path' by replacing all occurences of 'current' with 'new'.
+    """
+
+    if not path.is_file():
+        return "The file does not exist!"
+
+    contents = path.read_text()
+    if current not in contents:
+        return "The file does not contain any occurence of 'current'!"
+
+    path.write_text(contents.replace(current, new))
     return "Success!"
 
 
